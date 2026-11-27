@@ -104,6 +104,15 @@ td.h{background:color-mix(in srgb,var(--accent) calc(var(--h,0)*30%),transparent
 .pastbox .days{padding:0 10px 10px}
 input[type=file]{max-width:100%}
 @media (prefers-reduced-motion:no-preference){.btn{transition:border-color .15s}}
+
+.mode-pill{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);border-radius:999px;padding:5px 10px;background:var(--surface);font-size:12px;color:var(--muted)}
+.mode-pill.admin{border-color:var(--accent);color:var(--accent);font-weight:700}
+.login-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:30;display:grid;place-items:center;padding:16px}
+.login-card{width:min(100%,360px);background:var(--surface);color:var(--ink);border:1px solid var(--line);border-radius:14px;padding:20px;box-shadow:0 16px 48px rgba(0,0,0,.22)}
+.login-card h2{margin:0 0 6px;font-size:17px}.login-card p{margin:0 0 14px;color:var(--muted);font-size:13px}
+.login-card input{width:100%;border:1px solid var(--line);border-radius:8px;padding:11px 12px;background:var(--bg);margin-bottom:10px}
+.login-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:8px}
+
 </style>
 <div id="root"></div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
@@ -255,7 +264,7 @@ function shell(){
   root.innerHTML=
   '<div class="wrap">'+
   '<header class="top"><div><h1>'+esc(TITLE)+'</h1><p>제품별 입고 예정 수량을 월별·SKU별·일정별로 확인합니다.</p></div>'+
-  '<div class="hright"><div class="stamp num" id="stamp"></div><button class="btn primary" id="upBtn">엑셀 업로드</button></div></header>'+
+  '<div class="hright"><span class="mode-pill" id="modePill">● 뷰어 모드</span><div class="stamp num" id="stamp"></div><button class="btn primary" id="modeBtn">관리자 전환</button><button class="btn" id="upBtn" hidden>엑셀 업로드</button></div></header>'+
   '<section id="uploadSlot"></section>'+
   '<section id="nextSlot"></section>'+
   '<section class="kpis" id="kpis"></section>'+
@@ -264,7 +273,40 @@ function shell(){
   '<section class="panel"><h2>월별 · SKU별 입고량</h2><div class="tablewrap" id="matrix"></div></section>'+
   '<section class="panel"><h2>입고 일정</h2><div class="days" id="days"></div></section>'+
   '</div>';
-  document.getElementById("upBtn").addEventListener("click",function(){showUpload()});
+  document.getElementById("upBtn").addEventListener("click",function(){if(canEdit)showUpload()});
+  document.getElementById("modeBtn").addEventListener("click",function(){if(canEdit){setMode(false)}else{showLogin()}});
+  renderMode();
+}
+function renderMode(){
+  var pill=document.getElementById("modePill"),btn=document.getElementById("modeBtn"),up=document.getElementById("upBtn");
+  if(!pill||!btn||!up)return;
+  pill.textContent=canEdit?"● 관리자 모드":"● 뷰어 모드";
+  pill.className=canEdit?"mode-pill admin":"mode-pill";
+  btn.textContent=canEdit?"뷰어 모드 전환":"관리자 전환";
+  up.hidden=!canEdit;
+}
+function setMode(admin){
+  canEdit=!!admin;
+  renderMode();
+  if(!canEdit)document.getElementById("uploadSlot").innerHTML="";
+}
+function showLogin(){
+  if(document.getElementById("loginBackdrop"))return;
+  var el=document.createElement("div");
+  el.className="login-backdrop";el.id="loginBackdrop";
+  el.innerHTML='<div class="login-card" role="dialog" aria-modal="true" aria-labelledby="loginTitle"><h2 id="loginTitle">관리자 인증</h2><p>관리자 비밀번호를 입력해 주세요.</p><input id="adminPw" type="password" inputmode="numeric" autocomplete="off" placeholder="비밀번호" maxlength="32"><div id="loginError" class="msg err" hidden>비밀번호가 일치하지 않습니다.</div><div class="login-actions"><button class="btn" id="loginCancel" type="button">취소</button><button class="btn primary" id="loginSubmit" type="button">확인</button></div></div>';
+  document.body.appendChild(el);
+  var input=document.getElementById("adminPw");
+  function close(){el.remove()}
+  function submit(){
+    if(input.value==="0821"){close();setMode(true)}
+    else{document.getElementById("loginError").hidden=false;input.select()}
+  }
+  document.getElementById("loginCancel").addEventListener("click",close);
+  document.getElementById("loginSubmit").addEventListener("click",submit);
+  input.addEventListener("keydown",function(e){if(e.key==="Enter")submit();if(e.key==="Escape")close()});
+  el.addEventListener("click",function(e){if(e.target===el)close()});
+  input.focus();
 }
 function renderStamp(){
   var m=state.meta||{};
@@ -375,6 +417,7 @@ function update(keepFocus){
 
 /* ---------- upload & publish ---------- */
 function showUpload(){
+  if(!canEdit){showLogin();return}
   var slot=document.getElementById("uploadSlot");
   slot.innerHTML='<div class="upload"><div class="row" style="justify-content:space-between"><b>엑셀 파일 업로드</b><button class="btn" id="upClose" type="button">닫기</button></div>'+
     '<p>생산계획 입력용 파일(.xlsx)을 올리면 각 제품 시트의 \'입고\' 열(입고 · 감자밭 등)에서 날짜별 수량을 읽습니다. 수식으로 계산되는 열과 합계 열은 제외됩니다.</p>'+
@@ -467,11 +510,7 @@ async function publish(){
 /* ---------- boot ---------- */
 try{if(STANDALONE){var ls=JSON.parse(localStorage.getItem(LSKEY)||"null");if(ls&&ls.records&&ls.meta&&String(ls.meta.updated)>String((state.meta||{}).updated||""))state=ls}}catch(e){}
 ensureYear();shell();renderStamp();update();
-try{
-  if(!STANDALONE&&window.claude&&claude.use){
-    claude.use("user").then(function(u){return u?u.canEdit():null}).then(function(ok){canEdit=ok===true;if(ok===false)document.getElementById("upBtn").hidden=true}).catch(function(){});
-  }
-}catch(e){}
+renderMode();
 var mq=window.matchMedia&&matchMedia("(prefers-color-scheme: dark)");
 if(mq&&mq.addEventListener)mq.addEventListener("change",function(){renderChart()});
 new MutationObserver(function(){renderChart()}).observe(document.documentElement,{attributes:true,attributeFilter:["data-theme"]});
